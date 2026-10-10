@@ -338,7 +338,10 @@
   let lib = {lists: {}}, results = [], curList = store.get('list');
   const esc = t => String(t).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
   const api = (path, body) => fetch(`${base}${path}${path.includes('?') ? '&' : '?'}${q()}`,
-      body === undefined ? {cache: 'no-store'} : {method: 'POST', body: JSON.stringify(body)}).then(r => r.json());
+      body === undefined ? {cache: 'no-store'} : {method: 'POST', body: JSON.stringify(body)})
+      .then(r => { if (!r.ok) { const e = new Error('http'); e.status = r.status; throw e; } return r.json(); });
+  const why = e => e && e.status === 404 ? '이 PC 프로그램에는 검색 기능이 없어요. PC의 검은 창을 닫고 start.bat을 다시 실행하세요'
+    : e && e.status >= 500 ? '응답이 늦어요(처음에는 부품 설치 중일 수 있어요). 1분쯤 뒤 다시 시도하세요' : 'PC에 연결하지 못했어요';
   const noKey = () => { if (!base || !key) { $('#set').open = true; toast('먼저 PC 주소와 비밀키를 입력하세요'); return true; } return false; };
 
   function drawTracks(ul, tracks, mode){
@@ -357,7 +360,7 @@
       toast('재생 요청 · 소리는 몇 초 뒤에 나와요');
       if (!want) start();
       setTimeout(poll, 1500);
-    } catch(e) { toast('PC에 연결하지 못했어요'); }
+    } catch(e) { toast(why(e)); }
   }
 
   async function loadLib(){
@@ -408,7 +411,7 @@
       drawTracks($('#sres'), results, 'search');
       $('#sbulk').hidden = !results.length;
       $('#smsg').textContent = results.length ? '' : '결과가 없어요';
-    } catch(e) { $('#smsg').textContent = 'PC에 연결하지 못했어요'; }
+    } catch(e) { $('#smsg').textContent = why(e); }
   }
   $('#sf').addEventListener('submit', doSearch);
   $('#sres').addEventListener('click', ev => {
