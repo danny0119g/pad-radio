@@ -78,6 +78,7 @@
   <button id="btn" aria-label="듣기 시작/정지"><svg viewBox="0 0 24 24" id="ico"><path d="M8 5v14l11-7z"/></svg></button>
   <div id="state">대기 중</div>
   <div id="hint"></div>
+  <div id="dbg" style="font:11px ui-monospace,monospace;color:#5b6477;margin-top:-14px;text-align:center"></div>
   <div class="meter" aria-hidden="true"><i id="lv"></i></div>
 
   <div class="remote">
@@ -198,6 +199,11 @@
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden) { poll(); if (want && au.paused) reconnect('다시 연결'); }
   });
+
+  setInterval(() => {
+    const e = au.error ? au.error.code : '-';
+    $('#dbg').textContent = want ? `상태 ${au.readyState}/${au.networkState} 오류 ${e} 재생 ${au.currentTime.toFixed(1)}s 시도 ${tries}` : '';
+  }, 1000);
 
   // 감시: 재생 시간이 6초 넘게 안 흐르면 재연결
   setInterval(() => {
