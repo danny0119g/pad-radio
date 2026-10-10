@@ -16,6 +16,18 @@
        display:flex;flex-direction:column;align-items:center}
   main{width:100%;max-width:440px;display:flex;flex-direction:column;align-items:center;gap:22px;margin:auto 0}
   h1{margin:0;font-size:15px;font-weight:600;color:var(--sub);letter-spacing:.02em}
+
+  .now{width:100%;display:flex;gap:14px;align-items:center;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px}
+  .now[hidden]{display:none}
+  #cover{width:64px;height:64px;border-radius:8px;background:var(--bg);object-fit:cover;flex:none}
+  #cover[hidden]{display:none}
+  .meta{min-width:0;flex:1}
+  .ttl{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .art{color:var(--sub);font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .bar{height:4px;background:var(--line);border-radius:2px;margin-top:8px;overflow:hidden}
+  .bar i{display:block;height:100%;width:0;background:var(--txt)}
+  .tm{display:flex;justify-content:space-between;color:var(--sub);font-size:12px;margin-top:2px;font-variant-numeric:tabular-nums}
+
   #state{font-size:22px;font-weight:700;min-height:1.4em;text-align:center}
   #hint{color:var(--sub);font-size:14px;min-height:1.4em;text-align:center;margin-top:-14px}
   #btn{width:168px;height:168px;border-radius:50%;border:2px solid var(--line);background:var(--card);color:var(--txt);cursor:pointer;
@@ -29,6 +41,17 @@
   body[data-s="bad"] #state{color:var(--bad)}
   .meter{width:100%;height:8px;background:var(--card);border-radius:4px;overflow:hidden;border:1px solid var(--line)}
   .meter i{display:block;height:100%;width:0;background:var(--ok);transition:width .25s}
+
+  .remote{display:flex;gap:12px;width:100%;justify-content:center}
+  .remote button{width:84px;height:56px;border-radius:14px;border:1px solid var(--line);background:var(--card);color:var(--txt);
+       display:grid;place-items:center;cursor:pointer;-webkit-tap-highlight-color:transparent}
+  .remote button:active{background:var(--line)}
+  .remote svg{width:26px;height:26px;fill:currentColor}
+  .cap{color:var(--sub);font-size:12px;margin-top:-16px}
+  #toast{position:fixed;left:50%;bottom:max(24px,env(safe-area-inset-bottom));transform:translate(-50%,20px);background:#2a3040;color:var(--txt);
+       padding:10px 16px;border-radius:999px;font-size:14px;opacity:0;pointer-events:none;transition:.25s;max-width:90vw;text-align:center}
+  #toast.on{opacity:1;transform:translate(-50%,0)}
+
   details{width:100%;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:0 14px}
   summary{padding:12px 0;cursor:pointer;color:var(--sub);font-size:14px}
   label{display:block;font-size:13px;color:var(--sub);margin:10px 0 4px}
@@ -41,10 +64,28 @@
 <body data-s="idle">
 <main>
   <h1>PC 라디오</h1>
-  <button id="btn" aria-label="재생/정지"><svg viewBox="0 0 24 24" id="ico"><path d="M8 5v14l11-7z"/></svg></button>
+
+  <section class="now" id="now" hidden>
+    <img id="cover" alt="" hidden>
+    <div class="meta">
+      <div class="ttl" id="ttl"></div>
+      <div class="art" id="art"></div>
+      <div class="bar"><i id="pg"></i></div>
+      <div class="tm"><span id="t0">0:00</span><span id="t1">0:00</span></div>
+    </div>
+  </section>
+
+  <button id="btn" aria-label="듣기 시작/정지"><svg viewBox="0 0 24 24" id="ico"><path d="M8 5v14l11-7z"/></svg></button>
   <div id="state">대기 중</div>
   <div id="hint"></div>
   <div class="meter" aria-hidden="true"><i id="lv"></i></div>
+
+  <div class="remote">
+    <button data-cmd="prev" aria-label="이전 곡"><svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zM9.5 12l8.5 6V6z"/></svg></button>
+    <button data-cmd="playpause" aria-label="PC 재생/일시정지"><svg viewBox="0 0 24 24" id="pico"><path d="M8 5v14l11-7z"/></svg></button>
+    <button data-cmd="next" aria-label="다음 곡"><svg viewBox="0 0 24 24"><path d="M16 6h2v12h-2zM6 18l8.5-6L6 6z"/></svg></button>
+  </div>
+  <div class="cap">PC 조작</div>
 
   <details id="set">
     <summary>설정 · 연결 진단</summary>
@@ -56,6 +97,7 @@
     <pre id="log"></pre>
   </details>
 </main>
+<div id="toast" role="status"></div>
 <audio id="au" preload="none" playsinline></audio>
 
 <script>
@@ -69,6 +111,7 @@
   const onPages = /github\.io$/.test(location.hostname) || location.protocol === 'file:';
   let base = '', key = '';
   let want = false, gen = 0, tries = 0, lastT = 0, lastMove = Date.now(), statusTimer = null;
+  let trimOK = true, nowAt = 0, nowData = null, lastTitle = null, lastCover = -1;
 
   // 링크의 #u=주소&k=키 를 저장해 두고 주소창에서는 지움
   (function readHash(){
@@ -85,6 +128,13 @@
     $('#ico').innerHTML = playing ? '<path d="M7 5h4v14H7zM13 5h4v14h-4z"/>' : '<path d="M8 5v14l11-7z"/>';
   };
   const out = t => { $('#log').textContent += t + '\n'; };
+  let toastTimer = null;
+  const toast = t => {
+    const el = $('#toast'); el.textContent = t; el.classList.add('on');
+    clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove('on'), 2600);
+  };
+  const fmt = s => { s = Math.max(0, Math.round(s)); return Math.floor(s/60) + ':' + String(s%60).padStart(2,'0'); };
+  const q = () => `key=${encodeURIComponent(key)}`;
 
   async function loadCfg(){
     key = store.get('k');
@@ -101,7 +151,7 @@
 
   function open_(){
     if (!base || !key) { $('#set').open = true; setState('bad', '설정이 필요해요', 'PC 주소와 비밀키를 입력하세요'); return false; }
-    au.src = `${base}/stream?key=${encodeURIComponent(key)}&_=${Date.now()}`;
+    au.src = `${base}/stream?${q()}&_=${Date.now()}`;
     return true;
   }
 
@@ -110,7 +160,7 @@
     setState('wait', '연결 중…');
     if (open_()) { const p = au.play(); if (p) p.catch(onPlayFail); }
     else { want = false; setIcon(false); return; }
-    startStatus();
+    poll();
   }
   function onPlayFail(e){
     if (e && e.name === 'NotAllowedError') { want = false; setIcon(false); setState('idle', '버튼을 눌러 재생'); }
@@ -118,7 +168,7 @@
   function stop(){
     want = false; gen++; setIcon(false);
     au.pause(); au.removeAttribute('src'); au.load();
-    clearInterval(statusTimer); $('#lv').style.width = '0';
+    $('#lv').style.width = '0';
     setState('idle', '정지됨');
   }
 
@@ -137,71 +187,147 @@
     }, wait * 1000);
   }
 
-  au.addEventListener('playing', () => { tries = 0; lastMove = Date.now(); setState('live', '재생 중'); });
+  au.addEventListener('playing', () => {
+    tries = 0; lastMove = Date.now(); setState('live', '재생 중');
+    setTimeout(trimLag, 1500);
+  });
   au.addEventListener('error', () => reconnect('연결 오류'));
   au.addEventListener('ended', () => reconnect('방송이 끊김'));
   au.addEventListener('stalled', () => { lastMove = Math.min(lastMove, Date.now() - 4000); });
-  document.addEventListener('visibilitychange', () => { if (!document.hidden && want && au.paused) reconnect('다시 연결'); });
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) { poll(); if (want && au.paused) reconnect('다시 연결'); }
+  });
 
   // 감시: 재생 시간이 6초 넘게 안 흐르면 재연결
   setInterval(() => {
     if (!want || retryTimer) return;
     if (au.currentTime !== lastT) { lastT = au.currentTime; lastMove = Date.now(); return; }
-    if (Date.now() - lastMove > 6000) { lastMove = Date.now(); reconnect('소리가 멈춤'); }
+    if (Date.now() - lastMove > 6000) { lastMove = Date.now(); reconnect('소리가 메춤'); }
   }, 2000);
 
-  // PC에서 실제로 소리가 나는지 표시
-  function startStatus(){
-    clearInterval(statusTimer);
-    const tick = async () => {
-      if (!want || !base || !key) return;
-      try {
-        const r = await fetch(`${base}/status?key=${encodeURIComponent(key)}`, {cache:'no-store'});
-        const j = await r.json();
+  // 소리가 실시간보다 많이 늦어지면(접속 직후 약 6초) 3초 정도로 줄임. 브라우저가 허용할 때만.
+  function trimLag(){
+    if (!trimOK || !want || au.paused) return;
+    try {
+      const b = au.buffered; if (!b.length) return;
+      const end = b.end(b.length - 1), before = au.currentTime;
+      if (end - before > 4.5) {
+        au.currentTime = end - 3;
+        setTimeout(() => { if (Math.abs(au.currentTime - before) < 0.5) trimOK = false; }, 700);
+      }
+    } catch(e) { trimOK = false; }
+  }
+  setInterval(trimLag, 20000);
+
+  // PC 상태(지금 재생 중인 곡 + 소리 크기)
+  function renderNow(j){
+    const n = j.now, card = $('#now');
+    nowData = n; nowAt = performance.now();
+    $('#pico').innerHTML = n && n.status === 'playing'
+      ? '<path d="M7 5h4v14H7zM13 5h4v14h-4z"/>' : '<path d="M8 5v14l11-7z"/>';
+    if (!j.info || !n || (!n.title && !n.artist)) { card.hidden = true; return; }
+    card.hidden = false;
+    $('#ttl').textContent = n.title || '(제목 없음)';
+    $('#art').textContent = [n.artist, n.status === 'paused' ? '일시정지' : ''].filter(Boolean).join(' · ');
+    const img = $('#cover');
+    if (n.cover && n.cover !== lastCover) { img.hidden = false; img.src = `${base}/cover?${q()}&v=${n.cover}`; }
+    if (!n.cover) img.hidden = true;
+    lastCover = n.cover;
+    paintProgress();
+    const t = (n.title || '') + '|' + (n.artist || '');
+    if (t !== lastTitle) {
+      lastTitle = t;
+      if ('mediaSession' in navigator) {
+        navigator.mediaSession.metadata = new MediaMetadata({
+          title: n.title || 'PC 소리', artist: n.artist || '', album: n.album || 'PC 라디오',
+          artwork: n.cover ? [{src: `${base}/cover?${q()}&v=${n.cover}`, sizes: '300x300'}] : []});
+      }
+    }
+  }
+  function paintProgress(){
+    const n = nowData; if (!n) return;
+    let pos = n.pos;
+    if (n.status === 'playing' && n.dur) pos = Math.min(n.dur, n.pos + (performance.now() - nowAt) / 1000);
+    $('#pg').style.width = n.dur ? (100 * pos / n.dur) + '%' : '0';
+    $('#t0').textContent = n.dur ? fmt(pos) : '';
+    $('#t1').textContent = n.dur ? fmt(n.dur) : '';
+  }
+  setInterval(paintProgress, 500);
+
+  async function poll(){
+    if (!base || !key || document.hidden) return;
+    try {
+      const r = await fetch(`${base}/status?${q()}`, {cache:'no-store'});
+      if (!r.ok) return;
+      const j = await r.json();
+      renderNow(j);
+      if (want) {
         $('#lv').style.width = Math.min(100, Math.round(j.level * 140)) + '%';
         if (document.body.dataset.s === 'live')
           $('#hint').textContent = j.playing ? 'PC에서 소리가 나고 있어요' : 'PC가 조용해요 (재생 중인 곡이 없음)';
-      } catch(e) {}
-    };
-    tick(); statusTimer = setInterval(tick, 2500);
+      }
+    } catch(e) {}
   }
+  statusTimer = setInterval(poll, 2500);
+
+  // 리모컨: PC의 재생/이전/다음
+  const REMOTE_MSG = {playpause: 'PC 재생/일시정지', next: '다음 곡', prev: '이전 곡'};
+  async function remote(cmd){
+    if (!base || !key) { $('#set').open = true; toast('먼저 PC 주소와 비밀키를 입력하세요'); return; }
+    try { navigator.vibrate && navigator.vibrate(10); } catch(e) {}
+    try {
+      const r = await fetch(`${base}/control?${q()}&cmd=${cmd}`, {method: 'POST'});
+      const j = await r.json();
+      toast(j.ok ? REMOTE_MSG[cmd] + (want && cmd !== 'playpause' ? ' · 소리는 몇 초 뒤에 바뀌어요' : '')
+                 : 'PC가 받았지만 실행하지 못했어요 (음악 앱이 켜져 있나요?)');
+    } catch(e) { toast('PC에 연결하지 못했어요'); }
+    setTimeout(poll, 900);
+  }
+  document.querySelectorAll('.remote button').forEach(b => b.addEventListener('click', () => remote(b.dataset.cmd)));
 
   $('#btn').addEventListener('click', () => want ? stop() : start());
   $('#save').addEventListener('click', () => {
     const u = $('#u').value.trim().replace(/\/+$/,''), k = $('#k').value.trim();
     if (u) store.set('u', u); if (k) store.set('k', k);
-    base = u; key = k; out('저장했어요.');
+    base = u; key = k; out('저장했어요.'); poll();
   });
 
   $('#diag').addEventListener('click', async () => {
     $('#log').textContent = '';
     await loadCfg();
-    if (!base) return out('✗ PC 주소가 없어요. 위 칸에 입력하거나 PC가 만든 링크로 다시 여세요.');
+    if (!base) return out('✗ PC 주소가 없어요. 위츸에 입력하거나 PC가 만들 링크로 다시 여세요.');
     out('주소: ' + base);
     let t0 = performance.now();
     try {
       const r = await fetch(base + '/health', {cache:'no-store'});
-      out(r.ok ? `✓ PC에 접속됨 (${Math.round(performance.now()-t0)}ms)` : `✗ 응답 코드 ${r.status} (터널은 열렸지만 PC 프로그램이 안 켜져 있을 수 있어요)`);
+      out(r.ok ? `✓ PC에 접속됨 (${Math.round(performance.now()-t0)}ms)` : `✗ 응답 코드 ${r.status} (터널은 열린지만 PC 프로그램이 안 켜져 있을 수 있어요)`);
       if (!r.ok) return;
     } catch(e) {
       return out('✗ 이 네트워크에서 PC 주소에 접속할 수 없어요.\n  · PC의 start.bat 창이 켜져 있는지\n  · 이 네트워크가 해당 주소를 막고 있는지 확인');
     }
     if (!key) return out('✗ 비밀키가 없어요.');
     try {
-      const r = await fetch(`${base}/status?key=${encodeURIComponent(key)}`, {cache:'no-store'});
-      if (r.status === 403) return out('✗ 비밀키가 틀려요.');
+      const r = await fetch(`${base}/status?${q()}`, {cache:'no-store'});
+      if (r.status === 403) return out('✗ 비밀키가 퀀려요.');
       const j = await r.json();
-      out(`✓ 비밀키 확인됨 · 듣는 기기 ${j.listeners}대 · PC 소리 ${j.playing ? '나는 중' : '없음'}`);
+      out(`✓ 비밀키 확인됨 · 듣는 기기 ${j.listeners}秀점 · PC 소리 ${j.playing ? '나는 중' : '없음'}`);
+      out(j.info ? '✓ 곡 정보·리모컨 사용 가능' : '△ 곡 정보는 못 읽어요 (리모컸은 미디어 키로 동작)');
     } catch(e) { out('✗ 상태를 읽지 못했어요: ' + e.message); }
   });
 
   if ('mediaSession' in navigator) {
     navigator.mediaSession.metadata = new MediaMetadata({title: 'PC 소리', artist: '실시간', album: 'PC 라디오'});
-    navigator.mediaSession.setActionHandler('play', () => { if (!want) start(); });
-    navigator.mediaSession.setActionHandler('pause', () => stop());
+    const on = (a, f) => { try { navigator.mediaSession.setActionHandler(a, f); } catch(e) {} };
+    on('play', () => { if (!want) start(); });
+    on('pause', () => stop());
+    on('nexttrack', () => remote('next'));
+    on('previoustrack', () => remote('prev'));
   }
 
-  loadCfg().then(() => { if (!base || !key) { $('#set').open = true; setState('idle', '설정이 필요해요'); } else setState('idle', '버튼을 눌러 재생'); });
+  loadCfg().then(() => {
+    if (!base || !key) { $('#set').open = true; setState('idle', '설정이 필요해요'); }
+    else { setState('idle', '버튼을 눌러 재생'); poll(); }
+  });
 })();
 </script>
 </body>
