@@ -111,7 +111,7 @@
   };
   const onPages = /github\.io$/.test(location.hostname) || location.protocol === 'file:';
   let base = '', key = '';
-  let playedOnce = false, want = false, gen = 0, tries = 0, lastT = 0, lastMove = Date.now(), statusTimer = null;
+  let pollFail = 0, playedOnce = false, want = false, gen = 0, tries = 0, lastT = 0, lastMove = Date.now(), statusTimer = null;
   let trimOK = false, nowAt = 0, nowData = null, lastTitle = null, lastCover = -1;
 
   // 링크의 #u=주소&k=키 를 저장해 두고 주소창에서는 지움
@@ -121,6 +121,8 @@
     if (h.get('k')) store.set('k', h.get('k'));
     if (h.toString()) history.replaceState(null, '', location.pathname + location.search);
   })();
+
+  addEventListener('hashchange', () => location.reload());   // 같은 탭에서 새 링크를 붙여넣으면 새로 불러옴
 
   const setState = (s, text, hint='') => {
     document.body.dataset.s = s; $('#state').textContent = text; $('#hint').textContent = hint;
@@ -265,7 +267,8 @@
     if (!base || !key || document.hidden) return;
     try {
       const r = await fetch(`${base}/status?${q()}`, {cache:'no-store'});
-      if (!r.ok) return;
+      if (!r.ok) { if (++pollFail >= 3) $('#now').hidden = true; return; }
+      pollFail = 0;
       const j = await r.json();
       renderNow(j);
       if (want) {
@@ -273,7 +276,7 @@
         if (document.body.dataset.s === 'live')
           $('#hint').textContent = j.playing ? 'PC에서 소리가 나고 있어요' : 'PC가 조용해요 (재생 중인 곡이 없음)';
       }
-    } catch(e) {}
+    } catch(e) { if (++pollFail >= 3) $('#now').hidden = true; }
   }
   statusTimer = setInterval(poll, 2500);
 
