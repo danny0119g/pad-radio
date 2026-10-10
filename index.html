@@ -110,7 +110,7 @@
   };
   const onPages = /github\.io$/.test(location.hostname) || location.protocol === 'file:';
   let base = '', key = '';
-  let want = false, gen = 0, tries = 0, lastT = 0, lastMove = Date.now(), statusTimer = null;
+  let playedOnce = false, want = false, gen = 0, tries = 0, lastT = 0, lastMove = Date.now(), statusTimer = null;
   let trimOK = true, nowAt = 0, nowData = null, lastTitle = null, lastCover = -1;
 
   // 링크의 #u=주소&k=키 를 저장해 두고 주소창에서는 지움
@@ -151,6 +151,8 @@
 
   function open_(){
     if (!base || !key) { $('#set').open = true; setState('bad', '설정이 필요해요', 'PC 주소와 비밀키를 입력하세요'); return false; }
+    au.pause(); au.removeAttribute('src'); au.load();      // 이전 연결을 확실히 끊고 새로 연결
+    playedOnce = false; lastMove = Date.now(); lastT = 0;
     au.src = `${base}/stream?${q()}&_=${Date.now()}`;
     return true;
   }
@@ -188,12 +190,11 @@
   }
 
   au.addEventListener('playing', () => {
-    tries = 0; lastMove = Date.now(); setState('live', '재생 중');
+    tries = 0; playedOnce = true; lastMove = Date.now(); setState('live', '재생 중');
     setTimeout(trimLag, 1500);
   });
   au.addEventListener('error', () => reconnect('연결 오류'));
   au.addEventListener('ended', () => reconnect('방송이 끊김'));
-  au.addEventListener('stalled', () => { lastMove = Math.min(lastMove, Date.now() - 4000); });
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden) { poll(); if (want && au.paused) reconnect('다시 연결'); }
   });
@@ -202,7 +203,7 @@
   setInterval(() => {
     if (!want || retryTimer) return;
     if (au.currentTime !== lastT) { lastT = au.currentTime; lastMove = Date.now(); return; }
-    if (Date.now() - lastMove > 6000) { lastMove = Date.now(); reconnect('소리가 멈춤'); }
+    if (Date.now() - lastMove > (playedOnce ? 6000 : 15000)) { lastMove = Date.now(); reconnect('소리가 멈춤'); }
   }, 2000);
 
   // 소리가 실시간보다 많이 늦어지면(접속 직후 약 6초) 3초 정도로 줄임. 브라우저가 허용할 때만.
