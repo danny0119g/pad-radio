@@ -108,6 +108,7 @@
     <button data-cmd="next" aria-label="다음 곡"><svg viewBox="0 0 24 24"><path d="M16 6h2v12h-2zM6 18l8.5-6L6 6z"/></svg></button>
   </div>
   <div class="cap" id="cap">PC 조작</div>
+  <div class="bulk" style="width:100%"><button id="apple" data-cmd="apple">애플뮤직으로 돌아가기 (유튜브 끄고 재생)</button></div>
 
   <section class="lib" id="lib">
     <div class="tabs"><button data-tab="s" class="on">검색</button><button data-tab="l">내 플리</button></div>
@@ -241,7 +242,7 @@
 
   setInterval(() => {
     const e = au.error ? au.error.code : '-';
-    $('#dbg').textContent = want ? `상태 ${au.readyState}/${au.networkState} 오류 ${e} 재생 ${au.currentTime.toFixed(1)}s 시도 ${tries}` : '';
+    $('#dbg').textContent = (want ? `상태 ${au.readyState}/${au.networkState} 오류 ${e} 재생 ${au.currentTime.toFixed(1)}s 시도 ${tries} · ` : '') + (base ? (lastOK ? `곡정보 ${Math.round((Date.now() - lastOK) / 1000)}초 전` : '곡정보 대기') + (lastErr ? ' · ' + lastErr : '') : '');
   }, 1000);
 
   // 감시: 재생 시간이 6초 넘게 안 흐르면 재연결
@@ -301,12 +302,14 @@
   }
   setInterval(paintProgress, 500);
 
+  let lastOK = 0, lastErr = '';
   async function poll(){
     if (!base || !key || document.hidden) return;
+    const ac = new AbortController(), to = setTimeout(() => ac.abort(), 6000);   // 응답이 없으면 포기하고 다음 번에 다시
     try {
-      const r = await fetch(`${base}/status?${q()}`, {cache:'no-store'});
-      if (!r.ok) { if (++pollFail >= 3) $('#now').hidden = true; return; }
-      pollFail = 0;
+      const r = await fetch(`${base}/status?${q()}&t=${Date.now()}`, {cache:'no-store', signal: ac.signal});
+      if (!r.ok) { lastErr = 'HTTP ' + r.status; if (++pollFail >= 3) $('#now').hidden = true; return; }
+      pollFail = 0; lastOK = Date.now(); lastErr = '';
       const j = await r.json();
       renderNow(j);
       if (want) {
@@ -314,24 +317,26 @@
         if (document.body.dataset.s === 'live')
           $('#hint').textContent = j.playing ? 'PC에서 소리가 나고 있어요' : 'PC가 조용해요 (재생 중인 곡이 없음)';
       }
-    } catch(e) { if (++pollFail >= 3) $('#now').hidden = true; }
+    } catch(e) { lastErr = e.name === 'AbortError' ? '응답 없음' : '연결 실패'; if (++pollFail >= 3) $('#now').hidden = true; }
+    finally { clearTimeout(to); }
   }
   statusTimer = setInterval(poll, 2500);
+  addEventListener('pageshow', poll); addEventListener('focus', poll);
 
   // 리모컨: PC의 재생/이전/다음
-  const REMOTE_MSG = {playpause: 'PC 재생/일시정지', next: '다음 곡', prev: '이전 곡'};
+  const REMOTE_MSG = {playpause: 'PC 재생/일시정지', next: '다음 곡', prev: '이전 곡', apple: '애플뮤직으로 돌아가요'};
   async function remote(cmd){
     if (!base || !key) { $('#set').open = true; toast('먼저 PC 주소와 비밀키를 입력하세요'); return; }
     try { navigator.vibrate && navigator.vibrate(10); } catch(e) {}
     try {
       const r = await fetch(`${base}/control?${q()}&cmd=${cmd}`, {method: 'POST'});
       const j = await r.json();
-      toast(j.ok ? REMOTE_MSG[cmd] + (want && cmd !== 'playpause' ? ' · 소리는 몇 초 뒤에 바뀌어요' : '')
+      toast(j.ok ? REMOTE_MSG[cmd] + (want && cmd !== 'playpause' && cmd !== 'apple' ? ' · 소리는 몇 초 뒤에 바뀌어요' : '')
                  : 'PC가 받았지만 실행하지 못했어요 (음악 앱이 켜져 있나요?)');
     } catch(e) { toast('PC에 연결하지 못했어요'); }
     setTimeout(poll, 900);
   }
-  document.querySelectorAll('.remote button').forEach(b => b.addEventListener('click', () => remote(b.dataset.cmd)));
+  document.querySelectorAll('.remote button, #apple').forEach(b => b.addEventListener('click', () => remote(b.dataset.cmd)));
 
 
   // ───── 곡 검색 · 내 플리 ─────
