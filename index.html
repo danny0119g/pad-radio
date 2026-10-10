@@ -59,6 +59,27 @@
   .row{display:flex;gap:8px;margin:12px 0 14px}
   .row button{flex:1;padding:11px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--txt);font-size:15px;cursor:pointer}
   pre{margin:0 0 14px;white-space:pre-wrap;word-break:break-all;font:13px/1.55 ui-monospace,Menlo,Consolas,monospace;color:var(--sub)}
+
+  .lib{width:100%;display:flex;flex-direction:column;gap:10px}
+  .tabs{display:flex;gap:8px}
+  .tabs button{flex:1;padding:10px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--sub);font-size:15px;font-weight:600;cursor:pointer}
+  .tabs button.on{color:var(--txt);border-color:var(--ok)}
+  .sf{display:flex;gap:8px}
+  .sf input,.sf select{flex:1;min-width:0}
+  select{padding:11px 10px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--txt);font-size:16px}
+  .sf button,.bulk button{padding:10px 14px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--txt);font-size:14px;cursor:pointer;white-space:nowrap}
+  .bulk{display:flex;gap:8px}
+  .bulk[hidden]{display:none}
+  .bulk button{flex:1}
+  .tl{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+  .tl li{display:flex;align-items:center;gap:10px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:8px}
+  .tl img{width:64px;height:36px;border-radius:6px;object-fit:cover;background:var(--bg);flex:none}
+  .tl .tx{flex:1;min-width:0}
+  .tl .t1{font-size:14px;font-weight:600;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .tl .t2{font-size:12px;color:var(--sub);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .tl li button{width:40px;height:40px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--txt);font-size:17px;cursor:pointer;flex:none}
+  .msg{color:var(--sub);font-size:13px;text-align:center;min-height:1.4em}
+  [hidden]{display:none!important}
 </style>
 </head>
 <body data-s="idle">
@@ -86,7 +107,23 @@
     <button data-cmd="playpause" aria-label="PC 재생/일시정지"><svg viewBox="0 0 24 24" id="pico"><path d="M8 5v14l11-7z"/></svg></button>
     <button data-cmd="next" aria-label="다음 곡"><svg viewBox="0 0 24 24"><path d="M16 6h2v12h-2zM6 18l8.5-6L6 6z"/></svg></button>
   </div>
-  <div class="cap">PC 조작</div>
+  <div class="cap" id="cap">PC 조작</div>
+
+  <section class="lib" id="lib">
+    <div class="tabs"><button data-tab="s" class="on">검색</button><button data-tab="l">내 플리</button></div>
+    <div id="ps">
+      <form id="sf" class="sf"><input id="q" type="search" enterkeyhint="search" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="곡 이름 · 가수 · 유튜브 링크"><button type="submit">검색</button></form>
+      <div class="bulk" id="sbulk" hidden><button id="sall">▶ 전체 재생</button><button id="sadd">＋ 전체 담기</button></div>
+      <ul class="tl" id="sres"></ul>
+      <div class="msg" id="smsg"></div>
+    </div>
+    <div id="pl" hidden>
+      <div class="sf"><select id="lsel" aria-label="플리 선택"></select><button id="lnew">새 플리</button><button id="ldel">삭제</button></div>
+      <div class="bulk"><button id="lplay">▶ 전체 재생</button><button id="lshuf">섞어서 ▶</button></div>
+      <ul class="tl" id="lres"></ul>
+      <div class="msg" id="lmsg"></div>
+    </div>
+  </section>
 
   <details id="set">
     <summary>설정 · 연결 진단</summary>
@@ -232,6 +269,7 @@
   function renderNow(j){
     const n = j.now, card = $('#now');
     nowData = n; nowAt = performance.now();
+    $('#cap').textContent = j.queue && j.queue.active ? `PC 조작 · 대기열 ${j.queue.idx + 1}/${j.queue.n}` : 'PC 조작';
     $('#pico').innerHTML = n && n.status === 'playing'
       ? '<path d="M7 5h4v14H7zM13 5h4v14h-4z"/>' : '<path d="M8 5v14l11-7z"/>';
     if (!j.info || !n || (!n.title && !n.artist)) { card.hidden = true; return; }
@@ -294,6 +332,115 @@
     setTimeout(poll, 900);
   }
   document.querySelectorAll('.remote button').forEach(b => b.addEventListener('click', () => remote(b.dataset.cmd)));
+
+
+  // ───── 곡 검색 · 내 플리 ─────
+  let lib = {lists: {}}, results = [], curList = store.get('list');
+  const esc = t => String(t).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const api = (path, body) => fetch(`${base}${path}${path.includes('?') ? '&' : '?'}${q()}`,
+      body === undefined ? {cache: 'no-store'} : {method: 'POST', body: JSON.stringify(body)}).then(r => r.json());
+  const noKey = () => { if (!base || !key) { $('#set').open = true; toast('먼저 PC 주소와 비밀키를 입력하세요'); return true; } return false; };
+
+  function drawTracks(ul, tracks, mode){
+    ul.innerHTML = tracks.map((t, i) => `<li data-i="${i}">
+      <img loading="lazy" alt="" onerror="this.style.visibility='hidden'" src="${base}/thumb?${q()}&id=${t.id}">
+      <div class="tx"><div class="t1">${esc(t.title)}</div><div class="t2">${esc(t.channel)}${t.dur ? ' · ' + fmt(t.dur) : ''}</div></div>
+      <button data-act="play" aria-label="재생">▶</button>
+      <button data-act="${mode === 'list' ? 'del' : 'add'}" aria-label="${mode === 'list' ? '플리에서 빼기' : '플리에 담기'}">${mode === 'list' ? '✕' : '＋'}</button></li>`).join('');
+  }
+
+  async function playTracks(tracks, from = 0){
+    if (noKey()) return;
+    try {
+      const j = await api('/play', {tracks, start: from});
+      if (!j.ok) return toast('재생을 시작하지 못했어요');
+      toast('재생 요청 · 소리는 몇 초 뒤에 나와요');
+      if (!want) start();
+      setTimeout(poll, 1500);
+    } catch(e) { toast('PC에 연결하지 못했어요'); }
+  }
+
+  async function loadLib(){
+    if (!base || !key) return;
+    try { const j = await api('/library'); if (j.ok) lib = {lists: j.lists || {}}; } catch(e) { return; }
+    drawLists();
+  }
+  async function saveLib(){
+    try { const j = await api('/library', lib); if (j.ok) lib = {lists: j.lists}; else toast('플리를 저장하지 못했어요'); }
+    catch(e) { toast('플리를 저장하지 못했어요'); }
+    drawLists();
+  }
+  function drawLists(){
+    const names = Object.keys(lib.lists);
+    if (!names.includes(curList)) curList = names[0] || '';
+    $('#lsel').innerHTML = names.map(n => `<option${n === curList ? ' selected' : ''}>${esc(n)}</option>`).join('');
+    const tr = lib.lists[curList] || [];
+    drawTracks($('#lres'), tr, 'list');
+    $('#lmsg').textContent = names.length ? (tr.length ? `${tr.length}곡` : '비어 있어요. 검색에서 ＋를 눌러 담아 보세요') : '아직 플리가 없어요. "새 플리"를 눌러 만들어 보세요';
+  }
+  async function newList(){
+    const name = (prompt('새 플리 이름') || '').trim().slice(0, 40);
+    if (!name) return null;
+    if (!lib.lists[name]) lib.lists[name] = [];
+    curList = name; store.set('list', name);
+    await saveLib();
+    return name;
+  }
+  async function addTracks(tracks){
+    if (noKey()) return;
+    if (!curList && !(await newList())) return;
+    const have = new Set((lib.lists[curList] || []).map(t => t.id));
+    const add = tracks.filter(t => !have.has(t.id));
+    lib.lists[curList] = (lib.lists[curList] || []).concat(add);
+    await saveLib();
+    toast(add.length ? `'${curList}'에 ${add.length}곡 담았어요` : '이미 담겨 있어요');
+  }
+
+  async function doSearch(ev){
+    ev.preventDefault();
+    const text = $('#q').value.trim(); if (!text || noKey()) return;
+    $('#smsg').textContent = '검색 중… (처음에는 부품 설치로 1분쯤 걸릴 수 있어요)';
+    $('#sres').innerHTML = ''; $('#sbulk').hidden = true;
+    try {
+      const j = await api('/search?q=' + encodeURIComponent(text));
+      if (!j.ok) { $('#smsg').textContent = '검색 실패: ' + (j.error || '알 수 없는 오류'); return; }
+      results = j.results;
+      drawTracks($('#sres'), results, 'search');
+      $('#sbulk').hidden = !results.length;
+      $('#smsg').textContent = results.length ? '' : '결과가 없어요';
+    } catch(e) { $('#smsg').textContent = 'PC에 연결하지 못했어요'; }
+  }
+  $('#sf').addEventListener('submit', doSearch);
+  $('#sres').addEventListener('click', ev => {
+    const b = ev.target.closest('button'); if (!b) return;
+    const t = results[+b.closest('li').dataset.i];
+    if (b.dataset.act === 'play') playTracks([t]); else addTracks([t]);
+  });
+  $('#sall').addEventListener('click', () => playTracks(results));
+  $('#sadd').addEventListener('click', () => addTracks(results));
+  $('#lres').addEventListener('click', async ev => {
+    const b = ev.target.closest('button'); if (!b) return;
+    const i = +b.closest('li').dataset.i, tr = lib.lists[curList] || [];
+    if (b.dataset.act === 'play') playTracks(tr, i);
+    else { tr.splice(i, 1); await saveLib(); }
+  });
+  $('#lsel').addEventListener('change', () => { curList = $('#lsel').value; store.set('list', curList); drawLists(); });
+  $('#lnew').addEventListener('click', newList);
+  $('#ldel').addEventListener('click', async () => {
+    if (!curList || !confirm(`'${curList}' 플리를 지울까요?`)) return;
+    delete lib.lists[curList]; curList = ''; await saveLib();
+  });
+  $('#lplay').addEventListener('click', () => { const tr = lib.lists[curList] || []; if (tr.length) playTracks(tr, 0); });
+  $('#lshuf').addEventListener('click', () => {
+    const tr = (lib.lists[curList] || []).slice();
+    for (let i = tr.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [tr[i], tr[j]] = [tr[j], tr[i]]; }
+    if (tr.length) playTracks(tr, 0);
+  });
+  document.querySelectorAll('.tabs button').forEach(b => b.addEventListener('click', () => {
+    document.querySelectorAll('.tabs button').forEach(x => x.classList.toggle('on', x === b));
+    $('#ps').hidden = b.dataset.tab !== 's'; $('#pl').hidden = b.dataset.tab !== 'l';
+    if (b.dataset.tab === 'l') loadLib();
+  }));
 
   $('#btn').addEventListener('click', () => want ? stop() : start());
   $('#save').addEventListener('click', () => {
