@@ -281,7 +281,7 @@
     if (!n.cover) img.hidden = true;
     lastCover = n.cover;
     paintProgress();
-    const t = (n.title || '') + '|' + (n.artist || '');
+    const t = (n.title || '') + '|' + (n.artist || '') + '|' + (n.cover || 0);
     if (t !== lastTitle) {
       lastTitle = t;
       if ('mediaSession' in navigator) {
