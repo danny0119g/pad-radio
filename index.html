@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0d0f14">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>PC 라디오</title>
+<style>
+  :root{--bg:#0d0f14;--card:#171a22;--line:#262b37;--txt:#e8ebf2;--sub:#8b93a6;--ok:#3ddc97;--warn:#ffb454;--bad:#ff6b6b}
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{background:var(--bg);color:var(--txt);font:16px/1.5 -apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Malgun Gothic",system-ui,sans-serif;
+       padding:max(20px,env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) max(20px,env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left));
+       display:flex;flex-direction:column;align-items:center}
+  main{width:100%;max-width:440px;display:flex;flex-direction:column;align-items:center;gap:22px;margin:auto 0}
+  h1{margin:0;font-size:15px;font-weight:600;color:var(--sub);letter-spacing:.02em}
+  #state{font-size:22px;font-weight:700;min-height:1.4em;text-align:center}
+  #hint{color:var(--sub);font-size:14px;min-height:1.4em;text-align:center;margin-top:-14px}
+  #btn{width:168px;height:168px;border-radius:50%;border:2px solid var(--line);background:var(--card);color:var(--txt);cursor:pointer;
+       display:grid;place-items:center;-webkit-tap-highlight-color:transparent;transition:border-color .2s,background .2s}
+  #btn:active{transform:scale(.97)}
+  #btn svg{width:64px;height:64px;fill:currentColor}
+  body[data-s="live"] #btn{border-color:var(--ok)}
+  body[data-s="wait"] #btn{border-color:var(--warn)}
+  body[data-s="live"] #state{color:var(--ok)}
+  body[data-s="wait"] #state{color:var(--warn)}
+  body[data-s="bad"] #state{color:var(--bad)}
+  .meter{width:100%;height:8px;background:var(--card);border-radius:4px;overflow:hidden;border:1px solid var(--line)}
+  .meter i{display:block;height:100%;width:0;background:var(--ok);transition:width .25s}
+  details{width:100%;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:0 14px}
+  summary{padding:12px 0;cursor:pointer;color:var(--sub);font-size:14px}
+  label{display:block;font-size:13px;color:var(--sub);margin:10px 0 4px}
+  input{width:100%;padding:11px 12px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--txt);font-size:16px}
+  .row{display:flex;gap:8px;margin:12px 0 14px}
+  .row button{flex:1;padding:11px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--txt);font-size:15px;cursor:pointer}
+  pre{margin:0 0 14px;white-space:pre-wrap;word-break:break-all;font:13px/1.55 ui-monospace,Menlo,Consolas,monospace;color:var(--sub)}
+</style>
+</head>
+<body data-s="idle">
+<main>
+  <h1>PC 라디오</h1>
+  <button id="btn" aria-label="재생/정지"><svg viewBox="0 0 24 24" id="ico"><path d="M8 5v14l11-7z"/></svg></button>
+  <div id="state">대기 중</div>
+  <div id="hint"></div>
+  <div class="meter" aria-hidden="true"><i id="lv"></i></div>
+
+  <details id="set">
+    <summary>설정 · 연결 진단</summary>
+    <label for="u">PC 주소</label>
+    <input id="u" inputmode="url" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="https://….trycloudflare.com">
+    <label for="k">비밀키</label>
+    <input id="k" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="PC 화면에 나온 키">
+    <div class="row"><button id="save">저장</button><button id="diag">연결 진단</button></div>
+    <pre id="log"></pre>
+  </details>
+</main>
+<audio id="au" preload="none" playsinline></audio>
+
+<script>
+(() => {
+  const $ = s => document.querySelector(s);
+  const au = $('#au');
+  const store = {
+    get(k){ try { return localStorage.getItem(k) || ''; } catch(e){ return ''; } },
+    set(k,v){ try { localStorage.setItem(k,v); } catch(e){} }
+  };
+  const onPages = /github\.io$/.test(location.hostname) || location.protocol === 'file:';
+  let base = '', key = '';
+  let want = false, gen = 0, tries = 0, lastT = 0, lastMove = Date.now(), statusTimer = null;
+
+  // 링크의 #u=주소&k=키 를 저장해 두고 주소창에서는 지움
+  (function readHash(){
+    const h = new URLSearchParams(location.hash.slice(1));
+    if (h.get('u')) store.set('u', h.get('u').replace(/\/+$/,''));
+    if (h.get('k')) store.set('k', h.get('k'));
+    if (h.toString()) history.replaceState(null, '', location.pathname + location.search);
+  })();
+
+  const setState = (s, text, hint='') => {
+    document.body.dataset.s = s; $('#state').textContent = text; $('#hint').textContent = hint;
+  };
+  const setIcon = playing => {
+    $('#ico').innerHTML = playing ? '<path d="M7 5h4v14H7zM13 5h4v14h-4z"/>' : '<path d="M8 5v14l11-7z"/>';
+  };
+  const out = t => { $('#log').textContent += t + '\n'; };
+
+  async function loadCfg(){
+    key = store.get('k');
+    if (!onPages) { base = location.origin; store.set('u', base); }  // PC 주소로 직접 열었을 때
+    else {
+      base = store.get('u');
+      try {   // PC가 자동으로 올려 둔 최신 주소
+        const r = await fetch('stream.json?t=' + Date.now(), {cache:'no-store'});
+        if (r.ok) { const j = await r.json(); if (j.u) { base = j.u.replace(/\/+$/,''); store.set('u', base); } }
+      } catch(e) {}
+    }
+    $('#u').value = base; $('#k').value = key;
+  }
+
+  function open_(){
+    if (!base || !key) { $('#set').open = true; setState('bad', '설정이 필요해요', 'PC 주소와 비밀키를 입력하세요'); return false; }
+    au.src = `${base}/stream?key=${encodeURIComponent(key)}&_=${Date.now()}`;
+    return true;
+  }
+
+  function start(){
+    want = true; tries = 0; setIcon(true);
+    setState('wait', '연결 중…');
+    if (open_()) { const p = au.play(); if (p) p.catch(onPlayFail); }
+    else { want = false; setIcon(false); return; }
+    startStatus();
+  }
+  function onPlayFail(e){
+    if (e && e.name === 'NotAllowedError') { want = false; setIcon(false); setState('idle', '버튼을 눌러 재생'); }
+  }
+  function stop(){
+    want = false; gen++; setIcon(false);
+    au.pause(); au.removeAttribute('src'); au.load();
+    clearInterval(statusTimer); $('#lv').style.width = '0';
+    setState('idle', '정지됨');
+  }
+
+  // 끊기면 다시 연결 (1,2,4,8…최대 15초 간격)
+  let retryTimer = null;
+  function reconnect(why){
+    if (!want || retryTimer) return;
+    const wait = Math.min(15, 2 ** Math.min(tries, 4));
+    tries++;
+    setState('wait', '다시 연결 중…', `${why} · ${wait}초 뒤 재시도`);
+    retryTimer = setTimeout(async () => {
+      retryTimer = null;
+      if (!want) return;
+      await loadCfg();                       // 주소가 바뀌었을 수 있으니 다시 확인
+      if (open_()) { const p = au.play(); if (p) p.catch(() => reconnect('재생 실패')); }
+    }, wait * 1000);
+  }
+
+  au.addEventListener('playing', () => { tries = 0; lastMove = Date.now(); setState('live', '재생 중'); });
+  au.addEventListener('error', () => reconnect('연결 오류'));
+  au.addEventListener('ended', () => reconnect('방송이 끊김'));
+  au.addEventListener('stalled', () => { lastMove = Math.min(lastMove, Date.now() - 4000); });
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && want && au.paused) reconnect('다시 연결'); });
+
+  // 감시: 재생 시간이 6초 넘게 안 흐르면 재연결
+  setInterval(() => {
+    if (!want || retryTimer) return;
+    if (au.currentTime !== lastT) { lastT = au.currentTime; lastMove = Date.now(); return; }
+    if (Date.now() - lastMove > 6000) { lastMove = Date.now(); reconnect('소리가 멈춤'); }
+  }, 2000);
+
+  // PC에서 실제로 소리가 나는지 표시
+  function startStatus(){
+    clearInterval(statusTimer);
+    const tick = async () => {
+      if (!want || !base || !key) return;
+      try {
+        const r = await fetch(`${base}/status?key=${encodeURIComponent(key)}`, {cache:'no-store'});
+        const j = await r.json();
+        $('#lv').style.width = Math.min(100, Math.round(j.level * 140)) + '%';
+        if (document.body.dataset.s === 'live')
+          $('#hint').textContent = j.playing ? 'PC에서 소리가 나고 있어요' : 'PC가 조용해요 (재생 중인 곡이 없음)';
+      } catch(e) {}
+    };
+    tick(); statusTimer = setInterval(tick, 2500);
+  }
+
+  $('#btn').addEventListener('click', () => want ? stop() : start());
+  $('#save').addEventListener('click', () => {
+    const u = $('#u').value.trim().replace(/\/+$/,''), k = $('#k').value.trim();
+    if (u) store.set('u', u); if (k) store.set('k', k);
+    base = u; key = k; out('저장했어요.');
+  });
+
+  $('#diag').addEventListener('click', async () => {
+    $('#log').textContent = '';
+    await loadCfg();
+    if (!base) return out('✗ PC 주소가 없어요. 위 칸에 입력하거나 PC가 만든 링크로 다시 여세요.');
+    out('주소: ' + base);
+    let t0 = performance.now();
+    try {
+      const r = await fetch(base + '/health', {cache:'no-store'});
+      out(r.ok ? `✓ PC에 접속됨 (${Math.round(performance.now()-t0)}ms)` : `✗ 응답 코드 ${r.status} (터널은 열렸지만 PC 프로그램이 안 켜져 있을 수 있어요)`);
+      if (!r.ok) return;
+    } catch(e) {
+      return out('✗ 이 네트워크에서 PC 주소에 접속할 수 없어요.\n  · PC의 start.bat 창이 켜져 있는지\n  · 이 네트워크가 해당 주소를 막고 있는지 확인');
+    }
+    if (!key) return out('✗ 비밀키가 없어요.');
+    try {
+      const r = await fetch(`${base}/status?key=${encodeURIComponent(key)}`, {cache:'no-store'});
+      if (r.status === 403) return out('✗ 비밀키가 틀려요.');
+      const j = await r.json();
+      out(`✓ 비밀키 확인됨 · 듣는 기기 ${j.listeners}대 · PC 소리 ${j.playing ? '나는 중' : '없음'}`);
+    } catch(e) { out('✗ 상태를 읽지 못했어요: ' + e.message); }
+  });
+
+  if ('mediaSession' in navigator) {
+    navigator.mediaSession.metadata = new MediaMetadata({title: 'PC 소리', artist: '실시간', album: 'PC 라디오'});
+    navigator.mediaSession.setActionHandler('play', () => { if (!want) start(); });
+    navigator.mediaSession.setActionHandler('pause', () => stop());
+  }
+
+  loadCfg().then(() => { if (!base || !key) { $('#set').open = true; setState('idle', '설정이 필요해요'); } else setState('idle', '버튼을 눌러 재생'); });
+})();
+</script>
+</body>
+</html>
