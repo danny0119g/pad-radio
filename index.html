@@ -202,7 +202,7 @@
   setInterval(() => {
     if (!want || retryTimer) return;
     if (au.currentTime !== lastT) { lastT = au.currentTime; lastMove = Date.now(); return; }
-    if (Date.now() - lastMove > 6000) { lastMove = Date.now(); reconnect('소리가 메춤'); }
+    if (Date.now() - lastMove > 6000) { lastMove = Date.now(); reconnect('소리가 멈춤'); }
   }, 2000);
 
   // 소리가 실시간보다 많이 늦어지면(접속 직후 약 6초) 3초 정도로 줄임. 브라우저가 허용할 때만.
@@ -295,12 +295,12 @@
   $('#diag').addEventListener('click', async () => {
     $('#log').textContent = '';
     await loadCfg();
-    if (!base) return out('✗ PC 주소가 없어요. 위츸에 입력하거나 PC가 만들 링크로 다시 여세요.');
+    if (!base) return out('✗ PC 주소가 없어요. 위 칸에 입력하거나 PC가 만든 링크로 다시 여세요.');
     out('주소: ' + base);
     let t0 = performance.now();
     try {
       const r = await fetch(base + '/health', {cache:'no-store'});
-      out(r.ok ? `✓ PC에 접속됨 (${Math.round(performance.now()-t0)}ms)` : `✗ 응답 코드 ${r.status} (터널은 열린지만 PC 프로그램이 안 켜져 있을 수 있어요)`);
+      out(r.ok ? `✓ PC에 접속됨 (${Math.round(performance.now()-t0)}ms)` : `✗ 응답 코드 ${r.status} (터널은 열렸지만 PC 프로그램이 안 켜져 있을 수 있어요)`);
       if (!r.ok) return;
     } catch(e) {
       return out('✗ 이 네트워크에서 PC 주소에 접속할 수 없어요.\n  · PC의 start.bat 창이 켜져 있는지\n  · 이 네트워크가 해당 주소를 막고 있는지 확인');
@@ -308,10 +308,10 @@
     if (!key) return out('✗ 비밀키가 없어요.');
     try {
       const r = await fetch(`${base}/status?${q()}`, {cache:'no-store'});
-      if (r.status === 403) return out('✗ 비밀키가 퀀려요.');
+      if (r.status === 403) return out('✗ 비밀키가 틀려요.');
       const j = await r.json();
-      out(`✓ 비밀키 확인됨 · 듣는 기기 ${j.listeners}秀점 · PC 소리 ${j.playing ? '나는 중' : '없음'}`);
-      out(j.info ? '✓ 곡 정보·리모컨 사용 가능' : '△ 곡 정보는 못 읽어요 (리모컸은 미디어 키로 동작)');
+      out(`✓ 비밀키 확인됨 · 듣는 기기 ${j.listeners}대 · PC 소리 ${j.playing ? '나는 중' : '없음'}`);
+      out(j.info ? '✓ 곡 정보·리모컨 사용 가능' : '△ 곡 정보는 못 읽어요 (리모컨은 미디어 키로 동작)');
     } catch(e) { out('✗ 상태를 읽지 못했어요: ' + e.message); }
   });
 
