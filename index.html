@@ -111,12 +111,17 @@
   <div class="bulk" style="width:100%"><button id="apple" data-cmd="apple">애플뮤직으로 돌아가기 (유튜브 끄고 재생)</button></div>
 
   <section class="lib" id="lib">
-    <div class="tabs"><button data-tab="s" class="on">검색</button><button data-tab="l">내 플리</button></div>
+    <div class="tabs"><button data-tab="s" class="on">검색</button><button data-tab="l">내 플리</button><button data-tab="t">스테이션</button></div>
     <div id="ps">
       <form id="sf" class="sf"><input id="q" type="search" enterkeyhint="search" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="곡 이름 · 가수 · 유튜브 링크"><button type="submit">검색</button></form>
       <div class="bulk" id="sbulk" hidden><button id="sall">▶ 전체 재생</button><button id="sadd">＋ 전체 담기</button></div>
       <ul class="tl" id="sres"></ul>
       <div class="msg" id="smsg"></div>
+    </div>
+    <div id="pt" hidden>
+      <ul class="tl" id="tres"></ul>
+      <div class="bulk"><button id="tadd">＋ 스테이션 추가 (애플뮤직 링크)</button></div>
+      <div class="msg" id="tmsg"></div>
     </div>
     <div id="pl" hidden>
       <div class="sf"><select id="lsel" aria-label="플리 선택"></select><button id="lnew">새 플리</button><button id="ldel">삭제</button></div>
@@ -340,7 +345,7 @@
 
 
   // ───── 곡 검색 · 내 플리 ─────
-  let lib = {lists: {}}, results = [], curList = store.get('list');
+  let lib = {lists: {}, stations: []}, results = [], curList = store.get('list');
   const esc = t => String(t).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
   const api = (path, body) => fetch(`${base}${path}${path.includes('?') ? '&' : '?'}${q()}`,
       body === undefined ? {cache: 'no-store'} : {method: 'POST', body: JSON.stringify(body)})
@@ -370,13 +375,13 @@
 
   async function loadLib(){
     if (!base || !key) return;
-    try { const j = await api('/library'); if (j.ok) lib = {lists: j.lists || {}}; } catch(e) { return; }
-    drawLists();
+    try { const j = await api('/library'); if (j.ok) lib = {lists: j.lists || {}, stations: j.stations || []}; } catch(e) { return; }
+    drawLists(); drawStations();
   }
   async function saveLib(){
-    try { const j = await api('/library', lib); if (j.ok) lib = {lists: j.lists}; else toast('플리를 저장하지 못했어요'); }
+    try { const j = await api('/library', lib); if (j.ok) lib = {lists: j.lists, stations: j.stations || []}; else toast('플리를 저장하지 못했어요'); }
     catch(e) { toast('플리를 저장하지 못했어요'); }
-    drawLists();
+    drawLists(); drawStations();
   }
   function drawLists(){
     const names = Object.keys(lib.lists);
@@ -386,6 +391,33 @@
     drawTracks($('#lres'), tr, 'list');
     $('#lmsg').textContent = names.length ? (tr.length ? `${tr.length}곡` : '비어 있어요. 검색에서 ＋를 눌러 담아 보세요') : '아직 플리가 없어요. "새 플리"를 눌러 만들어 보세요';
   }
+  function drawStations(){
+    const st = lib.stations || [];
+    $('#tres').innerHTML = st.map((t, i) => `<li data-i="${i}"><div class="tx"><div class="t1">${esc(t.name)}</div><div class="t2">애플뮤직 스테이션</div></div>
+      <button data-act="play" aria-label="스테이션 재생">▶</button><button data-act="del" aria-label="삭제">✕</button></li>`).join('');
+    $('#tmsg').textContent = st.length ? '' : '등록된 스테이션이 없어요. 아래 버튼으로 추가하세요';
+  }
+  $('#tres').addEventListener('click', async ev => {
+    const b = ev.target.closest('button'); if (!b || noKey()) return;
+    const i = +b.closest('li').dataset.i, st = lib.stations[i];
+    if (b.dataset.act === 'del') { if (confirm(`'${st.name}' 스테이션을 지울까요?`)) { lib.stations.splice(i, 1); await saveLib(); } return; }
+    try {
+      const j = await api('/station', {url: st.url});
+      toast(j.ok ? `'${st.name}' 재생 요청 · 유튜브는 꺼지고 20~30초쯤 걸려요` : (j.error || '재생을 시작하지 못했어요'));
+      if (j.ok) { if (!want) start(); setTimeout(poll, 3000); }
+    } catch(e) { toast(why(e)); }
+  });
+  $('#tadd').addEventListener('click', async () => {
+    if (noKey()) return;
+    const url = (prompt('애플뮤직 스테이션 링크 (music.apple.com/…/station/…)') || '').trim();
+    if (!/^https:\/\/music\.apple\.com\/[a-z]{2}\/station\//.test(url)) { if (url) toast('스테이션 링크가 아니에요'); return; }
+    let guess = ''; try { guess = decodeURIComponent(url.split('/station/')[1].split('/')[0]); } catch(e) {}
+    const name = (prompt('버튼 이름', guess || '스테이션') || '').trim().slice(0, 40);
+    if (!name) return;
+    (lib.stations = lib.stations || []).push({name, url});
+    await saveLib();
+  });
+
   async function newList(){
     const name = (prompt('새 플리 이름') || '').trim().slice(0, 40);
     if (!name) return null;
@@ -446,8 +478,8 @@
   });
   document.querySelectorAll('.tabs button').forEach(b => b.addEventListener('click', () => {
     document.querySelectorAll('.tabs button').forEach(x => x.classList.toggle('on', x === b));
-    $('#ps').hidden = b.dataset.tab !== 's'; $('#pl').hidden = b.dataset.tab !== 'l';
-    if (b.dataset.tab === 'l') loadLib();
+    $('#ps').hidden = b.dataset.tab !== 's'; $('#pl').hidden = b.dataset.tab !== 'l'; $('#pt').hidden = b.dataset.tab !== 't';
+    if (b.dataset.tab !== 's') loadLib();
   }));
 
   $('#btn').addEventListener('click', () => want ? stop() : start());
