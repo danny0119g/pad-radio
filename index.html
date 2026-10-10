@@ -112,7 +112,7 @@
   const onPages = /github\.io$/.test(location.hostname) || location.protocol === 'file:';
   let base = '', key = '';
   let playedOnce = false, want = false, gen = 0, tries = 0, lastT = 0, lastMove = Date.now(), statusTimer = null;
-  let trimOK = true, nowAt = 0, nowData = null, lastTitle = null, lastCover = -1;
+  let trimOK = false, nowAt = 0, nowData = null, lastTitle = null, lastCover = -1;
 
   // 링크의 #u=주소&k=키 를 저장해 두고 주소창에서는 지움
   (function readHash(){
